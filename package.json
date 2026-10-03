@@ -1,12 +1,11 @@
 {
   "name": "stroodle",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Persistent agent runtime for the Stroodle registry. Turn any project into a discoverable AI agent.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "stroodle": "dist/cli/index.js",
-    "stroodle-agent": "dist/cli/index.js"
+    "stroodle": "dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc",

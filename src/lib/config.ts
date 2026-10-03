@@ -23,7 +23,7 @@ export interface Capability {
 const DEFAULT_CONFIG: StroodleConfig = {
   agent_id: null,
   api_key: "",
-  registry_url: "https://stroodle.ai",
+  registry_url: "https://api.stroodle.ai",
   capabilities: [],
   daemon: {
     poll_interval_ms: 15_000,
