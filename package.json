@@ -1,6 +1,6 @@
 {
-  "name": "stroodle-agent",
-  "version": "0.1.0",
+  "name": "stroodle",
+  "version": "0.1.1",
   "description": "Persistent agent runtime for the Stroodle registry. Turn any project into a discoverable AI agent.",
   "type": "module",
   "main": "dist/index.js",
@@ -37,5 +37,14 @@
     "ai-agent",
     "registry"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "author": {
+    "name": "Typico Games",
+    "url": "https://stroodle.ai"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Juicyscoop88/stroodle-agent"
+  },
+  "homepage": "https://stroodle.ai"
 }
