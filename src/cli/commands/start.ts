@@ -37,7 +37,9 @@ export const startCommand = new Command("start")
     }
 
     // Daemonize: spawn detached, pipe stdout/stderr to log
-    const { openSync } = await import("node:fs");
+    const { openSync, mkdirSync } = await import("node:fs");
+    const { configDir } = await import("../../lib/config.js");
+    mkdirSync(configDir(projectDir), { recursive: true });
     const logFd = openSync(logPath(projectDir), "a");
 
     const child = spawn("node", [daemonScript], {

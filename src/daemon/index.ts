@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-import { writeFile, unlink } from "node:fs/promises";
-import { RegistryAPI, type InboxTask } from "../lib/api.js";
+import { writeFile, unlink, mkdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { RegistryAPI } from "../lib/api.js";
 import {
   loadConfig,
   requireConfig,
@@ -24,18 +25,20 @@ async function main() {
     projectDir
   );
 
+  // Ensure config dir exists
+  const dir = configDir(projectDir);
+  if (!existsSync(dir)) await mkdir(dir, { recursive: true });
+
   // Write PID file
   const pid = process.pid;
   await writeFile(pidPath(projectDir), String(pid));
   await appendLog(`Daemon started (PID ${pid})`, "info", projectDir);
 
-  // Pending tasks queue — MCP bridge reads from this
-  const pendingTasks: InboxTask[] = [];
-
   receiver.onTask((task) => {
-    pendingTasks.push(task);
-    console.log(
-      JSON.stringify({ type: "task", task_id: task.task_id, message: task.message })
+    appendLog(
+      `New task ${task.task_id}: "${task.message}"`,
+      "task",
+      projectDir
     );
   });
 
@@ -45,52 +48,17 @@ async function main() {
   try {
     await api.heartbeat();
     await appendLog("Agent is online", "info", projectDir);
+    console.log(`[stroodle] Agent online (PID ${pid}), polling every ${config.daemon.poll_interval_ms / 1000}s`);
   } catch (err) {
-    await appendLog(
-      `Initial heartbeat failed: ${err instanceof Error ? err.message : String(err)}`,
-      "error",
-      projectDir
-    );
+    const msg = err instanceof Error ? err.message : String(err);
+    await appendLog(`Initial heartbeat failed: ${msg}`, "error", projectDir);
+    console.error(`[stroodle] Heartbeat failed: ${msg}`);
   }
 
-  // IPC: listen on stdin for commands from CLI/MCP bridge
-  process.stdin.setEncoding("utf-8");
-  process.stdin.on("data", async (data: string) => {
-    try {
-      const msg = JSON.parse(data.trim());
-      if (msg.type === "get_pending") {
-        console.log(JSON.stringify({ type: "pending", tasks: pendingTasks }));
-      } else if (msg.type === "complete_task") {
-        await api.completeTask(msg.task_id, msg.result, msg.success ?? true);
-        const idx = pendingTasks.findIndex((t) => t.task_id === msg.task_id);
-        if (idx !== -1) pendingTasks.splice(idx, 1);
-        await appendLog(`Task ${msg.task_id} completed`, "task", projectDir);
-        console.log(
-          JSON.stringify({ type: "task_completed", task_id: msg.task_id })
-        );
-      } else if (msg.type === "status") {
-        const agentId = config.agent_id;
-        let score = null;
-        if (agentId) {
-          try {
-            score = await api.getScore(agentId);
-          } catch {}
-        }
-        console.log(
-          JSON.stringify({
-            type: "status",
-            pid,
-            agent_id: agentId,
-            pending_count: pendingTasks.length,
-            score,
-            uptime_s: Math.floor(process.uptime()),
-          })
-        );
-      }
-    } catch {
-      // ignore malformed input
-    }
-  });
+  // Stdin: ignore EOF gracefully (happens when daemonized)
+  process.stdin.resume();
+  process.stdin.on("error", () => {});
+  process.stdin.on("end", () => {});
 
   async function shutdown() {
     await appendLog("Daemon shutting down", "info", projectDir);
@@ -114,5 +82,6 @@ main().catch(async (err) => {
     "error",
     projectDir
   );
+  console.error(`[stroodle] Fatal: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });

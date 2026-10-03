@@ -1,9 +1,7 @@
 import { Command } from "commander";
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { createInterface } from "node:readline/promises";
-import { stdin, stdout } from "node:process";
+import { join, resolve } from "node:path";
 import {
   loadConfig,
   saveConfig,
@@ -13,27 +11,43 @@ import {
 } from "../../lib/config.js";
 import { RegistryAPI } from "../../lib/api.js";
 
+async function askUser(question: string, defaultValue = ""): Promise<string> {
+  const { createInterface } = await import("node:readline/promises");
+  const { stdin, stdout } = await import("node:process");
+  const rl = createInterface({ input: stdin, output: stdout });
+  try {
+    const answer = await rl.question(question);
+    return answer.trim() || defaultValue;
+  } finally {
+    rl.close();
+  }
+}
+
+function isInteractive(): boolean {
+  return Boolean(process.stdin.isTTY);
+}
+
 export const initCommand = new Command("init")
   .description("Scan project, register agent, write config")
   .option("--registry <url>", "Registry URL", "https://stroodle.ai")
   .option("--api-key <key>", "API key (or set STROODLE_API_KEY)")
+  .option("--name <name>", "Agent name (defaults to directory name)")
+  .option("-y, --yes", "Non-interactive mode, accept all defaults")
   .action(async (opts) => {
     const projectDir = process.cwd();
-    const rl = createInterface({ input: stdin, output: stdout });
+    const nonInteractive = opts.yes || !isInteractive();
 
     console.log("\n  Scanning project...\n");
 
     // Check existing config
     const existing = await loadConfig(projectDir);
-    if (existing?.api_key) {
-      const resume = await rl.question(
-        "  Found existing .stroodle/config.json. Resume? [Y/n] "
+    if (existing?.api_key && !nonInteractive) {
+      const resume = await askUser(
+        "  Found existing .stroodle/config.json. Overwrite? [y/N] ",
+        "n"
       );
-      if (resume.toLowerCase() === "n") {
-        console.log("  Starting fresh.\n");
-      } else {
-        console.log("  Resuming with existing config.\n");
-        rl.close();
+      if (resume.toLowerCase() !== "y") {
+        console.log("  Keeping existing config.\n");
         return;
       }
     }
@@ -42,13 +56,18 @@ export const initCommand = new Command("init")
     let apiKey =
       opts.apiKey ?? process.env.STROODLE_API_KEY ?? existing?.api_key ?? "";
     if (!apiKey) {
-      apiKey = await rl.question("  Enter your Stroodle API key: ");
-      if (!apiKey.trim()) {
-        console.error("  API key is required. Get one at stroodle.ai/settings");
-        rl.close();
+      if (nonInteractive) {
+        console.error(
+          "  No API key found. Pass --api-key or set STROODLE_API_KEY.\n" +
+            "  Get a key at stroodle.ai/settings"
+        );
         process.exit(1);
       }
-      apiKey = apiKey.trim();
+      apiKey = await askUser("  Enter your Stroodle API key: ");
+      if (!apiKey) {
+        console.error("  API key is required. Get one at stroodle.ai/settings");
+        process.exit(1);
+      }
     }
 
     const registryUrl = opts.registry;
@@ -67,20 +86,22 @@ export const initCommand = new Command("init")
       console.log("  No capabilities auto-detected.\n");
     }
 
-    // Propose registration
-    const projectName = projectDir.split("/").pop() ?? "my-agent";
-    const name = await rl.question(
-      `  Agent name [${projectName}]: `
-    );
-    const agentName = name.trim() || projectName;
+    // Agent name
+    const defaultName = opts.name ?? projectDir.split("/").pop() ?? "my-agent";
+    let agentName = defaultName;
+    if (!nonInteractive && !opts.name) {
+      agentName = await askUser(`  Agent name [${defaultName}]: `, defaultName);
+    }
 
     // Register capabilities
     let agentId: string | null = existing?.agent_id ?? null;
     for (const cap of capabilities) {
-      const register = await rl.question(
-        `  Register "${cap.name}"? [Y/n] `
-      );
-      if (register.toLowerCase() === "n") continue;
+      let shouldRegister = nonInteractive;
+      if (!nonInteractive) {
+        const answer = await askUser(`  Register "${cap.name}"? [Y/n] `, "y");
+        shouldRegister = answer.toLowerCase() !== "n";
+      }
+      if (!shouldRegister) continue;
       try {
         const result = await api.registerCapability(cap);
         agentId = result.agent_id;
@@ -104,20 +125,13 @@ export const initCommand = new Command("init")
       },
     };
     await saveConfig(config, projectDir);
-    console.log(`\n  Config saved to .stroodle/config.json`);
+    console.log(`  Config saved to .stroodle/config.json`);
 
     // Patch .mcp.json
     await patchMcpConfig(projectDir);
 
     // Add .stroodle/ to .gitignore
     await ensureGitignore(projectDir);
-
-    const startDaemon = await rl.question("\n  Start the daemon? [Y/n] ");
-    rl.close();
-
-    if (startDaemon.toLowerCase() !== "n") {
-      console.log("  Run: stroodle start");
-    }
 
     console.log(
       `\n  Done. Your agent is configured at ${configDir(projectDir)}`
@@ -128,16 +142,6 @@ export const initCommand = new Command("init")
 async function scanProject(projectDir: string): Promise<Capability[]> {
   const capabilities: Capability[] = [];
 
-  // Check README
-  const readmePath = join(projectDir, "README.md");
-  if (existsSync(readmePath)) {
-    const readme = await readFile(readmePath, "utf-8");
-    // Simple heuristic: look for API/endpoint mentions
-    if (/\b(api|endpoint|route)\b/i.test(readme)) {
-      // Could do more sophisticated scanning here
-    }
-  }
-
   // Check package.json
   const pkgPath = join(projectDir, "package.json");
   if (existsSync(pkgPath)) {
@@ -145,7 +149,7 @@ async function scanProject(projectDir: string): Promise<Capability[]> {
       const pkg = JSON.parse(await readFile(pkgPath, "utf-8"));
       if (pkg.description) {
         capabilities.push({
-          name: pkg.name ?? "service",
+          name: pkg.name?.replace(/^@[^/]+\//, "") ?? "service",
           description: pkg.description,
           tags: pkg.keywords ?? [],
           price_hint: null,
@@ -154,23 +158,35 @@ async function scanProject(projectDir: string): Promise<Capability[]> {
     } catch {}
   }
 
-  // Check pyproject.toml (basic)
+  // Check pyproject.toml
   const pyprojectPath = join(projectDir, "pyproject.toml");
   if (existsSync(pyprojectPath)) {
-    const content = await readFile(pyprojectPath, "utf-8");
-    const descMatch = content.match(/description\s*=\s*"([^"]+)"/);
-    const nameMatch = content.match(/name\s*=\s*"([^"]+)"/);
-    if (descMatch) {
-      capabilities.push({
-        name: nameMatch?.[1] ?? "service",
-        description: descMatch[1],
-        tags: [],
-        price_hint: null,
-      });
-    }
+    try {
+      const content = await readFile(pyprojectPath, "utf-8");
+      const descMatch = content.match(/description\s*=\s*"([^"]+)"/);
+      const nameMatch = content.match(/name\s*=\s*"([^"]+)"/);
+      if (descMatch) {
+        capabilities.push({
+          name: nameMatch?.[1] ?? "service",
+          description: descMatch[1],
+          tags: [],
+          price_hint: null,
+        });
+      }
+    } catch {}
   }
 
   return capabilities;
+}
+
+function resolveCliEntrypoint(): string {
+  // Resolve to the actual installed location of the CLI
+  // Works whether installed globally, via npx, or running from local build
+  const cliIndex = resolve(
+    new URL(".", import.meta.url).pathname,
+    "../index.js"
+  );
+  return cliIndex;
 }
 
 async function patchMcpConfig(projectDir: string): Promise<void> {
@@ -182,10 +198,11 @@ async function patchMcpConfig(projectDir: string): Promise<void> {
     } catch {}
   }
 
+  const cliEntry = resolveCliEntrypoint();
   const servers = (mcpConfig.mcpServers as Record<string, unknown>) ?? {};
   servers["stroodle-agent"] = {
-    command: "npx",
-    args: ["stroodle-agent", "mcp"],
+    command: "node",
+    args: [cliEntry, "mcp"],
     env: {
       STROODLE_PROJECT_DIR: projectDir,
     },
