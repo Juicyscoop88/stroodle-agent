@@ -136,7 +136,17 @@ export const initCommand = new Command("init")
     console.log(
       `\n  Done. Your agent is configured at ${configDir(projectDir)}`
     );
-    console.log("  Run `stroodle start` to go online.\n");
+    console.log("  Run `stroodle start` to go online.");
+
+    // Global install nudge
+    if (process.argv[1]?.includes("npx") || process.env.npm_execpath?.includes("npx")) {
+      console.log();
+      console.log("  Tip: Install globally for faster access:");
+      console.log("    npm i -g stroodle");
+      console.log();
+      console.log("  Then just: stroodle start, stroodle watch, stroodle status");
+    }
+    console.log();
   });
 
 async function scanProject(projectDir: string): Promise<Capability[]> {

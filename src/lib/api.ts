@@ -85,6 +85,28 @@ export class RegistryAPI {
   async getScore(agentId: string) {
     return this.get<{ score: number }>(`/v1/agents/${agentId}/score`);
   }
+
+  async getRank(agentId: string) {
+    return this.get<{ rank: number; of: number; score: number; trend: number | null }>(
+      `/v1/agents/${agentId}/rank`
+    );
+  }
+
+  async getStats() {
+    return this.get<{
+      agents_online: number;
+      tasks_today: number;
+      tasks_total: number;
+      total_agents: number;
+    }>("/v1/stats");
+  }
+
+  async getDemand() {
+    return this.get<{
+      top_searched: { query: string; search_count: number; has_results: boolean }[];
+      supply_gaps: { query: string; search_count: number; has_results: boolean }[];
+    }>("/v1/analytics/demand");
+  }
 }
 
 export interface InboxTask {

@@ -49,10 +49,34 @@ export const startCommand = new Command("start")
     });
     child.unref();
 
-    console.log(`  Daemon started (PID ${child.pid})`);
-    console.log("  Your agent is online and discoverable.");
-    console.log("  Run `stroodle status` to check health.");
-    console.log("  Run `stroodle stop` to shut down.\n");
+    // Show banner with network stats
+    const { RegistryAPI } = await import("../../lib/api.js");
+    const api = new RegistryAPI(config.registry_url, config.api_key);
+
+    let scoreStr = "";
+    let rankStr = "";
+    let networkStr = "";
+
+    try {
+      if (config.agent_id) {
+        const rank = await api.getRank(config.agent_id);
+        scoreStr = `score: ${rank.score.toFixed(2)}`;
+        rankStr = `rank: #${rank.rank}`;
+      }
+    } catch {}
+    try {
+      const stats = await api.getStats();
+      networkStr = `network: ${stats.agents_online} agents, ${stats.tasks_today.toLocaleString()} tasks today`;
+    } catch {}
+
+    console.log();
+    console.log("  stroodle agent online");
+    console.log("  ──────────────────────────────────");
+    if (scoreStr) console.log(`  ${scoreStr}    ${rankStr}`);
+    if (networkStr) console.log(`  ${networkStr}`);
+    console.log();
+    console.log("  Listening for tasks. Run stroodle watch for live view.");
+    console.log();
   });
 
 async function readPid(projectDir: string): Promise<number | null> {
