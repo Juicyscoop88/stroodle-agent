@@ -11,6 +11,10 @@ export interface StroodleConfig {
     poll_interval_ms: number;
     log_max_lines: number;
   };
+  processing: {
+    enabled: boolean;
+  };
+  project_dir?: string;
 }
 
 export interface Capability {
@@ -28,6 +32,9 @@ const DEFAULT_CONFIG: StroodleConfig = {
   daemon: {
     poll_interval_ms: 15_000,
     log_max_lines: 1000,
+  },
+  processing: {
+    enabled: true,
   },
 };
 

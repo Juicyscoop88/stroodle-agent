@@ -11,6 +11,7 @@ import {
 } from "../lib/config.js";
 import { appendLog } from "../lib/log.js";
 import { PollingTaskReceiver } from "./task-receiver.js";
+import { processTask, notifyOS } from "./task-worker.js";
 
 const projectDir = process.env.STROODLE_PROJECT_DIR ?? process.cwd();
 
@@ -34,12 +35,27 @@ async function main() {
   await writeFile(pidPath(projectDir), String(pid));
   await appendLog(`Daemon started (PID ${pid})`, "info", projectDir);
 
-  receiver.onTask((task) => {
-    appendLog(
-      `New task ${task.task_id}: "${task.message}"`,
+  receiver.onTask(async (task) => {
+    await appendLog(
+      `Processing task ${task.task_id}: "${task.message}"`,
       "task",
       projectDir
     );
+    if (!config.processing?.enabled) {
+      await appendLog(`Skipping task ${task.task_id} (processing disabled)`, "info", projectDir);
+      return;
+    }
+    try {
+      const configWithDir = { ...config, project_dir: projectDir };
+      const result = await processTask(task, configWithDir);
+      await api.completeTask(task.task_id, result, true);
+      await appendLog(`Completed task ${task.task_id}`, "task", projectDir);
+      notifyOS("Stroodle", `Task completed: ${task.message.slice(0, 60)}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await appendLog(`Failed task ${task.task_id}: ${msg}`, "error", projectDir);
+      await api.completeTask(task.task_id, `Error: ${msg}`, false);
+    }
   });
 
   receiver.start();

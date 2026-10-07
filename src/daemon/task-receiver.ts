@@ -1,7 +1,7 @@
 import { RegistryAPI, type InboxTask } from "../lib/api.js";
 import { appendLog } from "../lib/log.js";
 
-export type TaskHandler = (task: InboxTask) => void;
+export type TaskHandler = (task: InboxTask) => void | Promise<void>;
 
 export interface TaskReceiver {
   start(): void;
@@ -52,7 +52,7 @@ export class PollingTaskReceiver implements TaskReceiver {
           this.projectDir
         );
         for (const handler of this.handlers) {
-          handler(task);
+          await handler(task);
         }
       }
 

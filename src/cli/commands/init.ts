@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import {
   loadConfig,
   saveConfig,
@@ -113,6 +113,16 @@ export const initCommand = new Command("init")
       }
     }
 
+    // Ask about task processing
+    let processingEnabled = true;
+    if (!nonInteractive) {
+      const answer = await askUser(
+        "  Enable automatic task processing? [Y/n] ",
+        "y"
+      );
+      processingEnabled = answer.toLowerCase() !== "n";
+    }
+
     // Save config
     const config: StroodleConfig = {
       agent_id: agentId,
@@ -123,15 +133,18 @@ export const initCommand = new Command("init")
         poll_interval_ms: 15_000,
         log_max_lines: 1000,
       },
+      processing: {
+        enabled: processingEnabled,
+      },
     };
     await saveConfig(config, projectDir);
     console.log(`  Config saved to .stroodle/config.json`);
 
-    // Patch .mcp.json
-    await patchMcpConfig(projectDir);
-
     // Add .stroodle/ to .gitignore
     await ensureGitignore(projectDir);
+
+    // Add Stroodle section to CLAUDE.md
+    await ensureClaudeMd(projectDir, agentName, capabilities);
 
     console.log(
       `\n  Done. Your agent is configured at ${configDir(projectDir)}`
@@ -189,37 +202,46 @@ async function scanProject(projectDir: string): Promise<Capability[]> {
   return capabilities;
 }
 
-function resolveCliEntrypoint(): string {
-  // Resolve to the actual installed location of the CLI
-  // Works whether installed globally, via npx, or running from local build
-  const cliIndex = resolve(
-    new URL(".", import.meta.url).pathname,
-    "../index.js"
-  );
-  return cliIndex;
-}
 
-async function patchMcpConfig(projectDir: string): Promise<void> {
-  const mcpPath = join(projectDir, ".mcp.json");
-  let mcpConfig: Record<string, unknown> = {};
-  if (existsSync(mcpPath)) {
-    try {
-      mcpConfig = JSON.parse(await readFile(mcpPath, "utf-8"));
-    } catch {}
+async function ensureClaudeMd(
+  projectDir: string,
+  agentName: string,
+  capabilities: Capability[]
+): Promise<void> {
+  const claudeMdPath = join(projectDir, "CLAUDE.md");
+  const marker = "## Stroodle Agent";
+  const capList = capabilities.length > 0
+    ? capabilities.map((c) => `- ${c.name}: ${c.description}`).join("\n")
+    : "- (none detected, update .stroodle/config.json)";
+
+  const section = `
+${marker}
+
+This project is a live A2A agent on the Stroodle network. \`stroodle start\` to go online.
+Other agents discover you by capability, send tasks, and get results back automatically.
+
+Capabilities: ${capabilities.map((c) => c.name).join(", ") || "(none yet)"}
+
+Hosting: \`stroodle start\`. That's the deployment. The daemon serves your capabilities
+using local tools and MCP servers from .mcp.json. No HTTP server, no cloud deploy, no infra.
+
+Monetization: Stroodle handles discovery and routing. Payments via x402 protocol are on the
+roadmap. Your StroodleScore (reputation) grows with every successful task, improving your
+ranking in search results and attracting more work.
+
+To add capabilities: configure MCP servers in .mcp.json, then \`stroodle init\` again.
+Describe your workflow and output format below to shape how tasks are processed.
+`;
+
+  if (existsSync(claudeMdPath)) {
+    const content = await readFile(claudeMdPath, "utf-8");
+    if (content.includes(marker)) return;
+    await writeFile(claudeMdPath, content.trimEnd() + "\n" + section);
+    console.log("  Added Stroodle section to CLAUDE.md");
+  } else {
+    await writeFile(claudeMdPath, `# ${agentName}\n` + section);
+    console.log("  Created CLAUDE.md with Stroodle agent context");
   }
-
-  const cliEntry = resolveCliEntrypoint();
-  const servers = (mcpConfig.mcpServers as Record<string, unknown>) ?? {};
-  servers["stroodle-agent"] = {
-    command: "node",
-    args: [cliEntry, "mcp"],
-    env: {
-      STROODLE_PROJECT_DIR: projectDir,
-    },
-  };
-  mcpConfig.mcpServers = servers;
-  await writeFile(mcpPath, JSON.stringify(mcpConfig, null, 2) + "\n");
-  console.log("  Updated .mcp.json with stroodle-agent MCP bridge");
 }
 
 async function ensureGitignore(projectDir: string): Promise<void> {
