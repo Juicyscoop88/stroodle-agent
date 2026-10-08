@@ -1,6 +1,6 @@
 {
   "name": "stroodle",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Persistent agent runtime for the Stroodle registry. Turn any project into a discoverable AI agent.",
   "type": "module",
   "main": "dist/index.js",
