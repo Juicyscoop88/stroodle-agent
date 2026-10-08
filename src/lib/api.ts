@@ -101,6 +101,43 @@ export class RegistryAPI {
     }>("/v1/stats");
   }
 
+  async submitObservationsA2A(
+    agentId: string,
+    observations: { kind: string; data: Record<string, unknown> }[],
+    sourceAgentId?: string
+  ): Promise<{ accepted: number; rejected: number }> {
+    const task = {
+      id: crypto.randomUUID(),
+      message: {
+        parts: [{
+          type: "data",
+          data: {
+            skill: "submit-observations",
+            agent_id: agentId,
+            observations,
+            source_agent_id: sourceAgentId ?? null,
+          },
+        }],
+      },
+    };
+    const url = new URL("/a2a", this.baseUrl);
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...this.authHeaders(),
+      },
+      body: JSON.stringify(task),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`A2A observation submit ${res.status}: ${text}`);
+    }
+    const body = await res.json() as { artifacts?: { parts?: { data?: { accepted: number; rejected: number } }[] }[] };
+    const data = body.artifacts?.[0]?.parts?.[0]?.data;
+    return data ?? { accepted: 0, rejected: 0 };
+  }
+
   async getDemand() {
     return this.get<{
       top_searched: { query: string; search_count: number; has_results: boolean }[];

@@ -1,0 +1,37 @@
+name: Integration Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    env:
+      STROODLE_API_KEY: ${{ secrets.STROODLE_TEST_API_KEY }}
+      STROODLE_API_URL: https://api.stroodle.ai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      - name: Init agent
+        run: node dist/cli/index.js init --name ci-test-agent --capabilities "integration test"
+
+      - name: Start agent in background
+        run: |
+          node dist/cli/index.js start --fg &
+          AGENT_PID=$!
+          echo "AGENT_PID=$AGENT_PID" >> $GITHUB_ENV
+          sleep 5
+
+      - name: Verify agent is online
+        run: node dist/cli/index.js status
+
+      - name: Stop agent
+        run: |
+          node dist/cli/index.js stop
+          kill $AGENT_PID 2>/dev/null || true

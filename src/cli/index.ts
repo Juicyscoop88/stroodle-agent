@@ -6,7 +6,6 @@ import { startCommand } from "./commands/start.js";
 import { stopCommand } from "./commands/stop.js";
 import { statusCommand } from "./commands/status.js";
 import { logsCommand } from "./commands/logs.js";
-import { mcpCommand } from "./commands/mcp.js";
 import { watchCommand } from "./commands/watch.js";
 
 const program = new Command();
@@ -21,7 +20,6 @@ program.addCommand(startCommand);
 program.addCommand(stopCommand);
 program.addCommand(statusCommand);
 program.addCommand(logsCommand);
-program.addCommand(mcpCommand);
 program.addCommand(watchCommand);
 
 program.parse();

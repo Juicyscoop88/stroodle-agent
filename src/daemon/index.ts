@@ -10,6 +10,7 @@ import {
   configDir,
 } from "../lib/config.js";
 import { appendLog } from "../lib/log.js";
+import { ObservationSender } from "../lib/observations.js";
 import { PollingTaskReceiver } from "./task-receiver.js";
 import { processTask, notifyOS } from "./task-worker.js";
 
@@ -25,6 +26,12 @@ async function main() {
     config.daemon.poll_interval_ms,
     projectDir
   );
+
+  let observations: ObservationSender | null = null;
+  if (config.agent_id && config.sharing.kinds.length > 0) {
+    observations = new ObservationSender(api, config.agent_id, config.sharing);
+    observations.start();
+  }
 
   // Ensure config dir exists
   const dir = configDir(projectDir);
@@ -45,26 +52,45 @@ async function main() {
       await appendLog(`Skipping task ${task.task_id} (processing disabled)`, "info", projectDir);
       return;
     }
+    const startTime = Date.now();
     try {
       const configWithDir = { ...config, project_dir: projectDir };
       const result = await processTask(task, configWithDir);
       await api.completeTask(task.task_id, result, true);
       await appendLog(`Completed task ${task.task_id}`, "task", projectDir);
       notifyOS("Stroodle", `Task completed: ${task.message.slice(0, 60)}`);
+      observations?.add({
+        kind: "call_result",
+        data: { success: true, duration_ms: Date.now() - startTime },
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await appendLog(`Failed task ${task.task_id}: ${msg}`, "error", projectDir);
       await api.completeTask(task.task_id, `Error: ${msg}`, false);
+      observations?.add({
+        kind: "call_result",
+        data: { success: false, duration_ms: Date.now() - startTime },
+      });
     }
   });
 
   receiver.start();
 
+  // Collect and send tool schemas on startup
+  if (observations) {
+    await observations.collectAndSendToolSchemas(projectDir);
+  }
+
   // Initial heartbeat to go online
+  const heartbeatStart = Date.now();
   try {
     await api.heartbeat();
     await appendLog("Agent is online", "info", projectDir);
     console.log(`[stroodle] Agent online (PID ${pid}), polling every ${config.daemon.poll_interval_ms / 1000}s`);
+    observations?.add({
+      kind: "heartbeat",
+      data: { latency_ms: Date.now() - heartbeatStart },
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await appendLog(`Initial heartbeat failed: ${msg}`, "error", projectDir);
@@ -79,6 +105,10 @@ async function main() {
   async function shutdown() {
     await appendLog("Daemon shutting down", "info", projectDir);
     receiver.stop();
+    if (observations) {
+      observations.stop();
+      await observations.flush().catch(() => {});
+    }
     try {
       await api.heartbeat(true);
     } catch {}

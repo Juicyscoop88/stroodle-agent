@@ -136,6 +136,9 @@ export const initCommand = new Command("init")
       processing: {
         enabled: processingEnabled,
       },
+      sharing: {
+        kinds: ["heartbeat"],
+      },
     };
     await saveConfig(config, projectDir);
     console.log(`  Config saved to .stroodle/config.json`);

@@ -2,6 +2,10 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+export interface SharingConfig {
+  kinds: string[];
+}
+
 export interface StroodleConfig {
   agent_id: string | null;
   api_key: string;
@@ -14,6 +18,7 @@ export interface StroodleConfig {
   processing: {
     enabled: boolean;
   };
+  sharing: SharingConfig;
   project_dir?: string;
 }
 
@@ -35,6 +40,9 @@ const DEFAULT_CONFIG: StroodleConfig = {
   },
   processing: {
     enabled: true,
+  },
+  sharing: {
+    kinds: ["heartbeat"],
   },
 };
 
