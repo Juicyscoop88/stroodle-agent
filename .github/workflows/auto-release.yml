@@ -41,4 +41,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          gh release create "v${VERSION}" --generate-notes
+          sleep 5
+          gh release create "v${VERSION}" --generate-notes --target main
