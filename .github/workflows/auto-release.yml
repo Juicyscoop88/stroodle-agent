@@ -16,17 +16,41 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          registry-url: https://registry.npmjs.org
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
 
-      - name: Bump version and tag
+      - name: Check if release needed
+        id: check
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          PUBLISHED=$(npm view stroodle version 2>/dev/null || echo "0.0.0")
+          if [ "$CURRENT" = "$PUBLISHED" ]; then
+            echo "needs_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "needs_release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Bump version, publish, and push
+        if: steps.check.outputs.needs_release == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           npm version patch --no-git-tag-version
           VERSION=$(node -p "require('./package.json').version")
+          npm publish
           git add package.json package-lock.json
           git commit -m "release: v${VERSION}"
           git tag "v${VERSION}"
           git push origin main --follow-tags
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.needs_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          gh release create "v${VERSION}" --generate-notes
