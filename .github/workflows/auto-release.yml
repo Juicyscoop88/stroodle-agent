@@ -7,6 +7,7 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    if: "!startsWith(github.event.head_commit.message, 'release:')"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,19 +22,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
 
-      - name: Check if release needed
-        id: check
-        run: |
-          CURRENT=$(node -p "require('./package.json').version")
-          PUBLISHED=$(npm view stroodle version 2>/dev/null || echo "0.0.0")
-          if [ "$CURRENT" = "$PUBLISHED" ]; then
-            echo "needs_release=true" >> $GITHUB_OUTPUT
-          else
-            echo "needs_release=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Bump version, publish, and push
-        if: steps.check.outputs.needs_release == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -48,7 +37,6 @@ jobs:
           git push origin main --follow-tags
 
       - name: Create GitHub Release
-        if: steps.check.outputs.needs_release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
