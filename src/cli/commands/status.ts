@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { loadConfig, requireConfig, pidPath } from "../../lib/config.js";
+import { loadConfig, requireConfig, pidPath, readState } from "../../lib/config.js";
 import { RegistryAPI } from "../../lib/api.js";
 
 export const statusCommand = new Command("status")
@@ -65,6 +65,14 @@ export const statusCommand = new Command("status")
     const status = daemonAlive ? "online" : "offline";
     const statusIcon = daemonAlive ? "\x1b[32m●\x1b[0m" : "\x1b[31m●\x1b[0m";
     console.log(`  daemon:       ${statusIcon} ${status}${daemonPid ? ` (PID ${daemonPid})` : ""}`);
+    const state = daemonAlive ? await readState(projectDir) : null;
+    if (state) {
+      console.log(`  mode:         ${state.mode} (${state.connected ? "connected" : "not connected"})`);
+    } else {
+      console.log(`  mode:         ${config.daemon.mode}`);
+    }
+    const publicUrl = state?.url ?? (config.slug ? `https://agents.stroodle.ai/${config.slug}` : null);
+    if (publicUrl) console.log(`  url:          ${publicUrl}`);
     console.log(`  connection:   ${daemonAlive ? "connected to " + config.registry_url : "disconnected"}`);
 
     if (rank) {

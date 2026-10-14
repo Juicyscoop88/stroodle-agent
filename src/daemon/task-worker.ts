@@ -30,37 +30,21 @@ Rules:
 }
 
 async function callLLM(prompt: string, cwd: string): Promise<string> {
-  try {
-    const { Claude } = await import("@anthropic-ai/claude-code");
-    const messages = await Claude.run({ prompt, cwd });
-    return extractResult(messages);
-  } catch (err: unknown) {
-    if (
-      err instanceof Error &&
-      (err.message.includes("Cannot find module") ||
-        err.message.includes("MODULE_NOT_FOUND"))
-    ) {
-      throw new Error(
-        "Install Claude Code to enable task processing: npm i -g @anthropic-ai/claude-code"
-      );
-    }
-    throw err;
-  }
-}
-
-function extractResult(messages: unknown[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i] as Record<string, unknown>;
-    if (msg.role !== "assistant") continue;
-    const content = msg.content;
-    if (typeof content === "string") return content;
-    if (Array.isArray(content)) {
-      for (let j = content.length - 1; j >= 0; j--) {
-        if (content[j]?.type === "text" && content[j]?.text) {
-          return content[j].text as string;
-        }
-      }
-    }
+  const { query } = await import("@anthropic-ai/claude-agent-sdk");
+  // Tasks come from other agents, so nothing is auto-approved: "dontAsk" denies every tool
+  // that the project's own .claude/settings*.json (allow list) and .mcp.json do not permit.
+  const stream = query({
+    prompt,
+    options: {
+      cwd,
+      permissionMode: "dontAsk",
+      settingSources: ["project", "local"],
+    },
+  });
+  for await (const msg of stream) {
+    if (msg.type !== "result") continue;
+    if (msg.subtype === "success") return msg.result || "(no result)";
+    throw new Error(`Task failed: ${msg.subtype}`);
   }
   return "(no result)";
 }

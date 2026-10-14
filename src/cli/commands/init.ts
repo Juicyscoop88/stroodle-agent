@@ -32,6 +32,7 @@ export const initCommand = new Command("init")
   .option("--registry <url>", "Registry URL", "https://stroodle.ai")
   .option("--api-key <key>", "API key (or set STROODLE_API_KEY)")
   .option("--name <name>", "Agent name (defaults to directory name)")
+  .option("--slug <slug>", "Public address: agents.stroodle.ai/<slug> (defaults to the agent name)")
   .option("-y, --yes", "Non-interactive mode, accept all defaults")
   .action(async (opts) => {
     const projectDir = process.cwd();
@@ -93,6 +94,36 @@ export const initCommand = new Command("init")
       agentName = await askUser(`  Agent name [${defaultName}]: `, defaultName);
     }
 
+    // Public address (agents.stroodle.ai/<slug>)
+    let slug: string | undefined = opts.slug ?? existing?.slug;
+    if (!slug) {
+      const wanted = opts.slug ?? agentName;
+      let suggested = wanted;
+      try {
+        const check = await api.slugAvailable(wanted);
+        suggested = check.available ? check.slug : (check.suggestion ?? check.slug);
+        if (!check.available) console.log(`  "${check.slug}" is taken, suggesting "${suggested}".`);
+      } catch {}
+      slug = suggested;
+      if (!nonInteractive) {
+        for (;;) {
+          const answer = await askUser(`  Agent URL: agents.stroodle.ai/[${slug}]: `, slug);
+          try {
+            const check = await api.slugAvailable(answer);
+            if (check.available) {
+              slug = check.slug;
+              break;
+            }
+            slug = check.suggestion ?? slug;
+            console.log(`  "${check.slug}" is taken. Try "${slug}" (press Enter) or type another.`);
+          } catch {
+            slug = answer;
+            break;
+          }
+        }
+      }
+    }
+
     // Register capabilities
     let agentId: string | null = existing?.agent_id ?? null;
     for (const cap of capabilities) {
@@ -103,8 +134,9 @@ export const initCommand = new Command("init")
       }
       if (!shouldRegister) continue;
       try {
-        const result = await api.registerCapability(cap);
+        const result = await api.registerCapability(cap, { agent_name: agentName, slug });
         agentId = result.agent_id;
+        if (result.slug) slug = result.slug;
         console.log(`  Registered: ${cap.name}`);
       } catch (err) {
         console.error(
@@ -129,9 +161,13 @@ export const initCommand = new Command("init")
       api_key: apiKey,
       registry_url: registryUrl,
       capabilities,
+      agent_name: agentName,
+      slug,
       daemon: {
         poll_interval_ms: 15_000,
         log_max_lines: 1000,
+        mode: "relay",
+        port: 0,
       },
       processing: {
         enabled: processingEnabled,
@@ -152,6 +188,7 @@ export const initCommand = new Command("init")
     console.log(
       `\n  Done. Your agent is configured at ${configDir(projectDir)}`
     );
+    if (agentId && slug) console.log(`  Public address: https://agents.stroodle.ai/${slug}`);
     console.log("  Run `stroodle start` to go online.");
 
     // Global install nudge

@@ -66,16 +66,51 @@ export class RegistryAPI {
     return this.post(`/v1/tasks/${taskId}/complete`, { result, success });
   }
 
-  async registerCapability(cap: {
-    name: string;
-    description: string;
-    tags: string[];
-    price_hint: string | null;
-  }) {
-    return this.post<{ agent_id: string; skill_id: string }>(
-      "/v1/agents/register-capability",
-      cap
+  async registerCapability(
+    cap: {
+      name: string;
+      description: string;
+      tags: string[];
+      price_hint: string | null;
+    },
+    agent?: { agent_name?: string; slug?: string }
+  ) {
+    return this.post<{
+      agent_id: string;
+      skill_id: string;
+      slug: string | null;
+      url: string | null;
+    }>("/v1/agents/register-capability", { ...cap, ...agent });
+  }
+
+  async slugAvailable(slug: string) {
+    return this.get<{ slug: string; available: boolean; suggestion: string | null }>(
+      "/v1/agents/slug-available",
+      { slug }
     );
+  }
+
+  async updateAddressing(
+    agentId: string,
+    body: { slug?: string; mode?: "relay" | "direct" | "polling"; public_url?: string }
+  ) {
+    const url = new URL(`/v1/agents/${agentId}/addressing`, this.baseUrl);
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Registry ${res.status}: ${text}`);
+    }
+    return res.json() as Promise<{
+      agent_id: string;
+      slug: string;
+      mode: string | null;
+      url: string;
+      card_url: string;
+    }>;
   }
 
   async getAgent(agentId: string) {

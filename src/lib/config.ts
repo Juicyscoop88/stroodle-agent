@@ -11,9 +11,14 @@ export interface StroodleConfig {
   api_key: string;
   registry_url: string;
   capabilities: Capability[];
+  agent_name?: string;
+  slug?: string;
   daemon: {
     poll_interval_ms: number;
     log_max_lines: number;
+    mode: "relay" | "direct" | "polling";
+    port: number;
+    public_url?: string;
   };
   processing: {
     enabled: boolean;
@@ -37,6 +42,8 @@ const DEFAULT_CONFIG: StroodleConfig = {
   daemon: {
     poll_interval_ms: 15_000,
     log_max_lines: 1000,
+    mode: "relay",
+    port: 0,
   },
   processing: {
     enabled: true,
@@ -62,13 +69,35 @@ export function logPath(projectDir?: string): string {
   return join(configDir(projectDir), "daemon.log");
 }
 
+export function statePath(projectDir?: string): string {
+  return join(configDir(projectDir), "state.json");
+}
+
+export interface DaemonState {
+  mode: "relay" | "direct" | "polling";
+  connected: boolean;
+  url: string | null;
+}
+
+export async function readState(projectDir?: string): Promise<DaemonState | null> {
+  try {
+    return JSON.parse(await readFile(statePath(projectDir), "utf-8")) as DaemonState;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadConfig(
   projectDir?: string
 ): Promise<StroodleConfig | null> {
   const p = configPath(projectDir);
   if (!existsSync(p)) return null;
   const raw = await readFile(p, "utf-8");
-  return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+  const parsed = JSON.parse(raw);
+  const daemon = { ...DEFAULT_CONFIG.daemon, ...parsed.daemon };
+  // configs written before spec 038 used "auto" | "tunnel"
+  if (!["relay", "direct", "polling"].includes(daemon.mode)) daemon.mode = "relay";
+  return { ...DEFAULT_CONFIG, ...parsed, daemon };
 }
 
 export async function saveConfig(
