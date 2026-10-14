@@ -76,7 +76,7 @@ function HLine({ width, left, right }: { width: number; left?: string; right?: s
   return <Text>  {l}{"─".repeat(width - 2)}{r}</Text>;
 }
 
-function Dashboard({ config, api }: { config: { agent_id: string | null; capabilities: { name: string }[]; registry_url: string; api_key: string }; api: RegistryAPI }) {
+function Dashboard({ config, api }: { config: { agent_id: string | null; capabilities: { name: string }[]; registry_url: string; agent_key: string }; api: RegistryAPI }) {
   const { exit } = useApp();
   const W = 58;
 
@@ -274,7 +274,7 @@ export const watchCommand = new Command("watch")
     const config = await loadConfig(projectDir);
     requireConfig(config);
 
-    const api = new RegistryAPI(config.registry_url, config.api_key);
+    const api = new RegistryAPI(config.registry_url, config.agent_key);
 
     render(<Dashboard config={config} api={api} />);
   });

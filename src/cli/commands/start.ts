@@ -69,7 +69,7 @@ export const startCommand = new Command("start")
 
     // Show banner with network stats
     const { RegistryAPI } = await import("../../lib/api.js");
-    const api = new RegistryAPI(config.registry_url, config.api_key);
+    const api = new RegistryAPI(config.registry_url, config.agent_key);
 
     let scoreStr = "";
     let rankStr = "";

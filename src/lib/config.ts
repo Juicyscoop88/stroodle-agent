@@ -8,7 +8,7 @@ export interface SharingConfig {
 
 export interface StroodleConfig {
   agent_id: string | null;
-  api_key: string;
+  agent_key: string;
   registry_url: string;
   capabilities: Capability[];
   agent_name?: string;
@@ -36,7 +36,7 @@ export interface Capability {
 
 const DEFAULT_CONFIG: StroodleConfig = {
   agent_id: null,
-  api_key: "",
+  agent_key: "",
   registry_url: "https://api.stroodle.ai",
   capabilities: [],
   daemon: {
@@ -118,8 +118,11 @@ export function requireConfig(
     );
     process.exit(1);
   }
-  if (!config.api_key) {
-    console.error("No API key configured. Run `stroodle init` first.");
+  if (!config.agent_key) {
+    console.error(
+      "No agent key in .stroodle/config.json (configs from before agent keys only hold an account key).\n" +
+        "Run `stroodle init` again."
+    );
     process.exit(1);
   }
 }

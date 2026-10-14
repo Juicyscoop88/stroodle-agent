@@ -30,7 +30,7 @@ function isInteractive(): boolean {
 export const initCommand = new Command("init")
   .description("Scan project, register agent, write config")
   .option("--registry <url>", "Registry URL", "https://stroodle.ai")
-  .option("--api-key <key>", "API key (or set STROODLE_API_KEY)")
+  .option("--api-key <key>", "Account key, used once to create the agent and never saved (or set STROODLE_API_KEY)")
   .option("--name <name>", "Agent name (defaults to directory name)")
   .option("--slug <slug>", "Public address: agents.stroodle.ai/<slug> (defaults to the agent name)")
   .option("-y, --yes", "Non-interactive mode, accept all defaults")
@@ -40,39 +40,41 @@ export const initCommand = new Command("init")
 
     console.log("\n  Scanning project...\n");
 
-    // Check existing config
+    // Existing project agent? Then init only refreshes its capabilities, with the agent's own key.
     const existing = await loadConfig(projectDir);
-    if (existing?.api_key && !nonInteractive) {
+    const hasAgent = Boolean(existing?.agent_key && existing?.agent_id);
+    if (hasAgent && !nonInteractive) {
       const resume = await askUser(
-        "  Found existing .stroodle/config.json. Overwrite? [y/N] ",
-        "n"
+        `  Found agent "${existing!.slug}" in .stroodle/config.json. Update its capabilities? [Y/n] `,
+        "y"
       );
-      if (resume.toLowerCase() !== "y") {
+      if (resume.toLowerCase() === "n") {
         console.log("  Keeping existing config.\n");
         return;
       }
     }
 
-    // Get API key
-    let apiKey =
-      opts.apiKey ?? process.env.STROODLE_API_KEY ?? existing?.api_key ?? "";
-    if (!apiKey) {
-      if (nonInteractive) {
-        console.error(
-          "  No API key found. Pass --api-key or set STROODLE_API_KEY.\n" +
-            "  Get a key at stroodle.ai/settings"
-        );
-        process.exit(1);
-      }
-      apiKey = await askUser("  Enter your Stroodle API key: ");
-      if (!apiKey) {
-        console.error("  API key is required. Get one at stroodle.ai/settings");
-        process.exit(1);
-      }
-    }
-
     const registryUrl = opts.registry;
-    const api = new RegistryAPI(registryUrl, apiKey);
+
+    // The account key creates the agent. It is used here only and is never written to disk.
+    async function getAccountApi(): Promise<RegistryAPI> {
+      let key = opts.apiKey ?? process.env.STROODLE_API_KEY ?? "";
+      if (!key) {
+        if (nonInteractive) {
+          console.error(
+            "  No account key found. Pass --api-key or set STROODLE_API_KEY.\n" +
+              "  Get one at stroodle.ai/settings"
+          );
+          process.exit(1);
+        }
+        key = await askUser("  Enter your Stroodle account key (not saved): ");
+        if (!key) {
+          console.error("  An account key is required. Get one at stroodle.ai/settings");
+          process.exit(1);
+        }
+      }
+      return new RegistryAPI(registryUrl, key);
+    }
 
     // Scan project for capabilities
     const capabilities = await scanProject(projectDir);
@@ -87,29 +89,56 @@ export const initCommand = new Command("init")
       console.log("  No capabilities auto-detected.\n");
     }
 
-    // Agent name
-    const defaultName = opts.name ?? projectDir.split("/").pop() ?? "my-agent";
-    let agentName = defaultName;
-    if (!nonInteractive && !opts.name) {
-      agentName = await askUser(`  Agent name [${defaultName}]: `, defaultName);
+    // Choose which capabilities to register
+    const chosen: Capability[] = [];
+    for (const cap of capabilities) {
+      let shouldRegister = true;
+      if (!nonInteractive) {
+        const answer = await askUser(`  Register "${cap.name}"? [Y/n] `, "y");
+        shouldRegister = answer.toLowerCase() !== "n";
+      }
+      if (shouldRegister) chosen.push(cap);
     }
 
-    // Public address (agents.stroodle.ai/<slug>)
-    let slug: string | undefined = opts.slug ?? existing?.slug;
-    if (!slug) {
-      const wanted = opts.slug ?? agentName;
-      let suggested = wanted;
+    let agentId: string | null = existing?.agent_id ?? null;
+    let agentKey = existing?.agent_key ?? "";
+    let agentName = existing?.agent_name ?? opts.name ?? projectDir.split("/").pop() ?? "my-agent";
+    let slug: string = existing?.slug ?? "";
+
+    if (hasAgent) {
+      const agentApi = new RegistryAPI(registryUrl, agentKey);
+      for (const cap of chosen) {
+        try {
+          await agentApi.addCapability(agentId!, cap);
+          console.log(`  Registered: ${cap.name}`);
+        } catch (err) {
+          console.error(
+            `  Failed to register ${cap.name}: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      }
+    } else {
+      const accountApi = await getAccountApi();
+
+      // Agent name
+      const defaultName = opts.name ?? projectDir.split("/").pop() ?? "my-agent";
+      agentName = defaultName;
+      if (!nonInteractive && !opts.name) {
+        agentName = await askUser(`  Agent name [${defaultName}]: `, defaultName);
+      }
+
+      // Public address (agents.stroodle.ai/<slug>)
+      slug = opts.slug ?? agentName;
       try {
-        const check = await api.slugAvailable(wanted);
-        suggested = check.available ? check.slug : (check.suggestion ?? check.slug);
-        if (!check.available) console.log(`  "${check.slug}" is taken, suggesting "${suggested}".`);
+        const check = await accountApi.slugAvailable(slug);
+        slug = check.available ? check.slug : (check.suggestion ?? check.slug);
+        if (!check.available) console.log(`  "${check.slug}" is taken, suggesting "${slug}".`);
       } catch {}
-      slug = suggested;
       if (!nonInteractive) {
         for (;;) {
           const answer = await askUser(`  Agent URL: agents.stroodle.ai/[${slug}]: `, slug);
           try {
-            const check = await api.slugAvailable(answer);
+            const check = await accountApi.slugAvailable(answer);
             if (check.available) {
               slug = check.slug;
               break;
@@ -122,26 +151,20 @@ export const initCommand = new Command("init")
           }
         }
       }
-    }
 
-    // Register capabilities
-    let agentId: string | null = existing?.agent_id ?? null;
-    for (const cap of capabilities) {
-      let shouldRegister = nonInteractive;
-      if (!nonInteractive) {
-        const answer = await askUser(`  Register "${cap.name}"? [Y/n] `, "y");
-        shouldRegister = answer.toLowerCase() !== "n";
-      }
-      if (!shouldRegister) continue;
       try {
-        const result = await api.registerCapability(cap, { agent_name: agentName, slug });
-        agentId = result.agent_id;
-        if (result.slug) slug = result.slug;
-        console.log(`  Registered: ${cap.name}`);
+        const created = await accountApi.createRuntimeAgent({
+          name: agentName,
+          slug,
+          capabilities: chosen,
+        });
+        agentId = created.agent_id;
+        agentKey = created.api_key;
+        slug = created.slug;
+        for (const cap of chosen) console.log(`  Registered: ${cap.name}`);
       } catch (err) {
-        console.error(
-          `  Failed to register ${cap.name}: ${err instanceof Error ? err.message : String(err)}`
-        );
+        console.error(`  Could not create the agent: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
       }
     }
 
@@ -158,9 +181,9 @@ export const initCommand = new Command("init")
     // Save config
     const config: StroodleConfig = {
       agent_id: agentId,
-      api_key: apiKey,
+      agent_key: agentKey,
       registry_url: registryUrl,
-      capabilities,
+      capabilities: chosen,
       agent_name: agentName,
       slug,
       daemon: {
@@ -183,7 +206,7 @@ export const initCommand = new Command("init")
     await ensureGitignore(projectDir);
 
     // Add Stroodle section to CLAUDE.md
-    await ensureClaudeMd(projectDir, agentName, capabilities);
+    await ensureClaudeMd(projectDir, agentName, chosen);
 
     console.log(
       `\n  Done. Your agent is configured at ${configDir(projectDir)}`

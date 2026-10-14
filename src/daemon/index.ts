@@ -8,7 +8,6 @@ import {
   requireConfig,
   pidPath,
   configDir,
-  saveConfig,
   statePath,
   type DaemonState,
 } from "../lib/config.js";
@@ -25,7 +24,7 @@ async function main() {
   const config = await loadConfig(projectDir);
   requireConfig(config);
 
-  const api = new RegistryAPI(config.registry_url, config.api_key);
+  const api = new RegistryAPI(config.registry_url, config.agent_key);
 
   let observations: ObservationSender | null = null;
   if (config.agent_id && config.sharing.kinds.length > 0) {
@@ -100,21 +99,12 @@ async function main() {
     return poller;
   }
 
-  // Claim an address if this agent has none yet (configs written before spec 038)
+  // Tell the registry how this agent is reached. The address (slug) was claimed by `init`.
   async function ensureAddress(wanted: DaemonState["mode"], url?: string) {
     if (!config!.agent_id) return;
     try {
-      let slug = config!.slug;
-      if (!slug) {
-        const check = await api.slugAvailable(config!.agent_name ?? config!.capabilities[0]?.name ?? "agent");
-        slug = check.available ? check.slug : check.suggestion ?? check.slug;
-      }
-      const res = await api.updateAddressing(config!.agent_id, { slug, mode: wanted, public_url: url });
+      const res = await api.updateAddressing(config!.agent_id, { mode: wanted, public_url: url });
       publicUrl = wanted === "direct" ? res.url : res.url.replace(/\/a2a$/, "");
-      if (config!.slug !== res.slug) {
-        config!.slug = res.slug;
-        await saveConfig(config!, projectDir);
-      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await appendLog(`Address registration failed: ${msg}`, "error", projectDir);
@@ -142,7 +132,7 @@ async function main() {
     console.log(`[stroodle] Agent online (PID ${pid}), direct mode on port ${port}, public ${base}/a2a`);
   } else if (mode === "relay") {
     await ensureAddress("relay");
-    relay = new RelayTaskReceiver(config.registry_url, config.api_key, {
+    relay = new RelayTaskReceiver(config.registry_url, config.agent_key, {
       onConnected: () => {
         if (poller) {
           poller.stop();

@@ -66,21 +66,31 @@ export class RegistryAPI {
     return this.post(`/v1/tasks/${taskId}/complete`, { result, success });
   }
 
-  async registerCapability(
-    cap: {
-      name: string;
-      description: string;
-      tags: string[];
-      price_hint: string | null;
-    },
-    agent?: { agent_name?: string; slug?: string }
+  // Agent key: add (or replace) one capability of this agent
+  async addCapability(
+    agentId: string,
+    cap: { name: string; description: string; tags: string[]; price_hint: string | null }
   ) {
+    return this.post<{ agent_id: string; skill_id: string; slug: string | null; url: string | null }>(
+      `/v1/agents/${agentId}/capabilities`,
+      cap
+    );
+  }
+
+  // Account key: create this project's agent (or re-issue its key when the slug is already yours)
+  async createRuntimeAgent(body: {
+    name: string;
+    slug: string;
+    description?: string;
+    capabilities: { name: string; description: string; tags: string[]; price_hint: string | null }[];
+  }) {
     return this.post<{
       agent_id: string;
-      skill_id: string;
-      slug: string | null;
-      url: string | null;
-    }>("/v1/agents/register-capability", { ...cap, ...agent });
+      slug: string;
+      url: string;
+      card_url: string;
+      api_key: string;
+    }>("/v1/agents/runtime", body);
   }
 
   async slugAvailable(slug: string) {

@@ -11,7 +11,7 @@ export const statusCommand = new Command("status")
     const config = await loadConfig(projectDir);
     requireConfig(config);
 
-    const api = new RegistryAPI(config.registry_url, config.api_key);
+    const api = new RegistryAPI(config.registry_url, config.agent_key);
 
     // Check daemon
     const daemonPid = await getDaemonPid(projectDir);
