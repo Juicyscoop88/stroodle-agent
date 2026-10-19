@@ -194,6 +194,7 @@ export class RegistryAPI {
 export interface InboxTask {
   task_id: string;
   message: string;
+  depth?: number;
   buyer_id?: string;
   created_at?: string;
   status?: { state: string };

@@ -51,7 +51,7 @@ async function main() {
 
   // Run one task through the Claude Code SDK. Returns null when processing is disabled.
   async function runTask(
-    task: { task_id: string; message: string },
+    task: { task_id: string; message: string; depth?: number },
     reportObservation: boolean
   ): Promise<{ result: string; success: boolean } | null> {
     await appendLog(`Processing task ${task.task_id}: "${task.message}"`, "task", projectDir);

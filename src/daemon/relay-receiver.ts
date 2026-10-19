@@ -74,14 +74,14 @@ export class RelayTaskReceiver implements TaskReceiver {
     });
 
     ws.on("message", (raw) => {
-      let msg: { type?: string; task_id?: string; message?: string };
+      let msg: { type?: string; task_id?: string; message?: string; depth?: number };
       try {
         msg = JSON.parse(raw.toString());
       } catch {
         return;
       }
       if (msg.type === "task" && msg.task_id && msg.message !== undefined) {
-        this.enqueue(msg.task_id, msg.message);
+        this.enqueue(msg.task_id, msg.message, typeof msg.depth === "number" ? msg.depth : 0);
       }
     });
 
@@ -114,7 +114,7 @@ export class RelayTaskReceiver implements TaskReceiver {
   }
 
   // One task at a time (Claude Code SDK). Later tasks wait in the local queue.
-  private enqueue(taskId: string, message: string): void {
+  private enqueue(taskId: string, message: string, depth: number): void {
     if (this.seen.has(taskId)) return;
     this.seen.add(taskId);
     if (this.seen.size > 10_000) this.seen = new Set([taskId]);
@@ -122,7 +122,7 @@ export class RelayTaskReceiver implements TaskReceiver {
       this.send({ type: "ack", task_id: taskId });
       await appendLog(`New task ${taskId}: "${message}"`, "task", this.projectDir);
       for (const handler of this.handlers) {
-        await handler({ task_id: taskId, message });
+        await handler({ task_id: taskId, message, depth });
       }
     }).catch(() => {});
   }

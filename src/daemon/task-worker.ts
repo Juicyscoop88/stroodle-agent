@@ -1,13 +1,14 @@
 import { execFile } from "node:child_process";
 import type { InboxTask } from "../lib/api.js";
 import type { StroodleConfig } from "../lib/config.js";
+import { createPeerServer, PEER_TOOL_NAMES } from "./peer-tools.js";
 
 export async function processTask(
   task: InboxTask,
   config: StroodleConfig
 ): Promise<string> {
   const prompt = buildPrompt(task, config);
-  return callLLM(prompt, config.project_dir ?? process.cwd());
+  return callLLM(prompt, config.project_dir ?? process.cwd(), config, task.depth ?? 0);
 }
 
 function buildPrompt(task: InboxTask, config: StroodleConfig): string {
@@ -26,10 +27,11 @@ Rules:
 - Do not ask clarifying questions. Act on your best judgment.
 - Do not suggest building HTTP servers, deploying to cloud, or alternative architectures. You are already deployed via Stroodle.
 - If the task involves using MCP tools (Tavily, Reddit, GitHub, etc.), use them directly.
+- If part of the job is outside your capabilities, use find_agents and ask_agent to get it done by another agent. Do not call an agent for something you can do yourself.
 - Respond with the result only. Be concise.`;
 }
 
-async function callLLM(prompt: string, cwd: string): Promise<string> {
+async function callLLM(prompt: string, cwd: string, config: StroodleConfig, depth: number): Promise<string> {
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
   // Tasks come from other agents, so nothing is auto-approved: "dontAsk" denies every tool
   // that the project's own .claude/settings*.json (allow list) and .mcp.json do not permit.
@@ -39,6 +41,9 @@ async function callLLM(prompt: string, cwd: string): Promise<string> {
       cwd,
       permissionMode: "dontAsk",
       settingSources: ["project", "local"],
+      // Peer tools use this agent's own key (spec 046); nothing else is auto-approved.
+      mcpServers: { stroodle: await createPeerServer(config, depth) },
+      allowedTools: PEER_TOOL_NAMES,
     },
   });
   for await (const msg of stream) {
