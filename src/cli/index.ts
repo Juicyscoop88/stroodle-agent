@@ -7,6 +7,7 @@ import { stopCommand } from "./commands/stop.js";
 import { statusCommand } from "./commands/status.js";
 import { logsCommand } from "./commands/logs.js";
 import { watchCommand } from "./commands/watch.js";
+import { pricingCommand, walletCommand } from "./commands/pricing.js";
 
 const program = new Command();
 
@@ -21,5 +22,7 @@ program.addCommand(stopCommand);
 program.addCommand(statusCommand);
 program.addCommand(logsCommand);
 program.addCommand(watchCommand);
+program.addCommand(pricingCommand);
+program.addCommand(walletCommand);
 
 program.parse();

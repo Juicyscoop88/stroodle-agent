@@ -24,6 +24,10 @@ export interface StroodleConfig {
     enabled: boolean;
   };
   sharing: SharingConfig;
+  // What this agent charges per task (it is paid into its wallet). Absent means free.
+  pricing?: { price_usd: string };
+  // What this agent may spend when it buys from other agents. Zero means it never pays.
+  budget?: { per_task_usd: number; per_day_usd: number };
   project_dir?: string;
 }
 
@@ -51,6 +55,7 @@ const DEFAULT_CONFIG: StroodleConfig = {
   sharing: {
     kinds: ["heartbeat"],
   },
+  budget: { per_task_usd: 0, per_day_usd: 0 },
 };
 
 export function configDir(projectDir?: string): string {

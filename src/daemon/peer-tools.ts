@@ -1,5 +1,10 @@
 import { z } from "zod";
+import { x402Client } from "@x402/core/client";
+import { ExactEvmScheme } from "@x402/evm/exact/client";
+import { wrapFetchWithPayment } from "@x402/fetch";
+import { privateKeyToAccount } from "viem/accounts";
 import type { StroodleConfig } from "../lib/config.js";
+import { loadWallet, recordSpend, spentToday } from "../lib/wallet.js";
 
 // Built-in tools that let the agent's LLM find and call other agents (spec 046). They use the
 // agent's own key, so nothing in the project directory can reach the account key, and they are
@@ -42,14 +47,46 @@ function resultText(task: TaskResult): string {
   return text || `(no result, state: ${task.status?.state ?? "unknown"})`;
 }
 
+type PaidReply = { res: Response; refused?: string; paidUsd?: number };
+
+// An agent that charges answers 402 with its terms (x402). Pay only inside the budget the owner
+// set; the default budget is zero, so an agent never spends unless its owner allowed it.
+async function payingFetch(config: StroodleConfig, url: URL, init: RequestInit): Promise<PaidReply> {
+  const res = await fetch(url, init);
+  if (res.status !== 402) return { res };
+  const header = res.headers.get("payment-required");
+  let usd = NaN;
+  try {
+    const terms = JSON.parse(Buffer.from(header ?? "", "base64").toString());
+    usd = Number(terms?.accepts?.[0]?.amount) / 1e6;
+  } catch {}
+  if (!Number.isFinite(usd)) return { res, refused: "The agent asks for payment but its terms are unreadable." };
+  const budget = config.budget ?? { per_task_usd: 0, per_day_usd: 0 };
+  if (usd > budget.per_task_usd) {
+    return { res, refused: `This agent charges $${usd} per task. Your budget is $${budget.per_task_usd} per task, so it was not called.` };
+  }
+  const spent = await spentToday(config.slug ?? "");
+  if (spent + usd > budget.per_day_usd) {
+    return { res, refused: `Daily budget of $${budget.per_day_usd} would be exceeded (spent $${spent.toFixed(4)}).` };
+  }
+  const wallet = await loadWallet(config.slug ?? "");
+  if (!wallet) return { res, refused: "This agent has no wallet, so it cannot pay. Run `stroodle wallet`." };
+  const client = new x402Client();
+  client.register("eip155:*", new ExactEvmScheme(privateKeyToAccount(wallet.privateKey)));
+  const paid = await wrapFetchWithPayment(fetch, client)(url, init);
+  if (paid.ok) await recordSpend(config.slug ?? "", usd);
+  return { res: paid, paidUsd: paid.ok ? usd : undefined };
+}
+
 async function rpc(
   config: StroodleConfig,
   slug: string,
   method: string,
   params: Record<string, unknown>,
   depth: number
-): Promise<{ result?: TaskResult; error?: { message: string } }> {
-  const res = await fetch(new URL(`/${slug}/a2a`, config.registry_url), {
+): Promise<{ result?: TaskResult; error?: { message: string }; paidUsd?: number }> {
+  const url = new URL(`/${slug}/a2a`, config.registry_url);
+  const init: RequestInit = {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -58,8 +95,15 @@ async function rpc(
     },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     signal: AbortSignal.timeout(40_000),
-  });
-  return (await res.json()) as { result?: TaskResult; error?: { message: string } };
+  };
+  // Only a new task can cost money; polling a task is free.
+  const { res, refused, paidUsd } = method === "message/send"
+    ? await payingFetch(config, url, init)
+    : { res: await fetch(url, init), refused: undefined, paidUsd: undefined };
+  if (refused) return { error: { message: refused } };
+  if (res.status === 402) return { error: { message: "Payment was required and was not accepted." } };
+  const reply = (await res.json()) as { result?: TaskResult; error?: { message: string } };
+  return { ...reply, paidUsd };
 }
 
 export async function findAgents(config: StroodleConfig, query: string, limit = 5): Promise<string> {
@@ -97,6 +141,7 @@ export async function askAgent(
   const deadline = Date.now() + ASK_TIMEOUT_MS;
   let reply = await rpc(config, slug, "message/send", params, depth);
   if (reply.error) return `Call failed: ${reply.error.message}`;
+  const paidUsd = reply.paidUsd;
   let task = reply.result;
   while (task && ["submitted", "working"].includes(task.status?.state ?? "") && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
@@ -108,7 +153,7 @@ export async function askAgent(
   const state = task.status?.state;
   if (state === "failed" || state === "canceled") return `The agent could not complete the task (${state}).`;
   if (state !== "completed") return "The agent did not answer in time.";
-  return resultText(task);
+  return paidUsd ? `${resultText(task)}\n\n(paid $${paidUsd} to ${slug})` : resultText(task);
 }
 
 /** In-process MCP server handed to the claude-agent-sdk for one task. */

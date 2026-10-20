@@ -48,6 +48,27 @@ export class RegistryAPI {
     return res.json() as Promise<T>;
   }
 
+  async patch<T = unknown>(path: string, body: Record<string, unknown>): Promise<T> {
+    const res = await fetch(new URL(path, this.baseUrl), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...this.authHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Registry ${res.status}: ${text}`);
+    }
+    return res.json() as Promise<T>;
+  }
+
+  // Agent key: set or clear what this agent charges and where payments go
+  async setPricing(agentId: string, walletAddress: string | null, priceUsd: string | null) {
+    return this.patch(`/v1/agents/${agentId}/pricing`, {
+      wallet_address: walletAddress,
+      price_usd: priceUsd,
+    });
+  }
+
   async heartbeat(goingOffline = false) {
     return this.post<{
       pending_tasks: number;
