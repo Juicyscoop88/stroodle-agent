@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { appendFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import type { InboxTask } from "../lib/api.js";
 import type { StroodleConfig } from "../lib/config.js";
 import { createPeerServer, PEER_TOOL_NAMES } from "./peer-tools.js";
@@ -31,6 +33,35 @@ Rules:
 - Respond with the result only. Be concise.`;
 }
 
+const num = (value: string | undefined): number | undefined => {
+  const n = Number(value);
+  return value && Number.isFinite(n) && n > 0 ? n : undefined;
+};
+
+/**
+ * Limits of one task. A task comes from another agent, so it must not be able to spend without bound: the number of
+ * turns is capped by default, a budget in USD is opt-in (STROODLE_MAX_BUDGET_USD), the model can be pinned
+ * (STROODLE_MODEL, e.g. an inference profile when running on Bedrock).
+ */
+function taskLimits() {
+  return {
+    maxTurns: num(process.env.STROODLE_MAX_TURNS) ?? 40,
+    maxBudgetUsd: num(process.env.STROODLE_MAX_BUDGET_USD),
+    model: process.env.STROODLE_MODEL || undefined,
+  };
+}
+
+/** What the LLM cost, one line per task in .stroodle/spend.jsonl, so an owner (or the lab driver) can cap a day. */
+async function recordSpend(cwd: string, usd: number, taskDepth: number): Promise<void> {
+  try {
+    const dir = join(cwd, ".stroodle");
+    await mkdir(dir, { recursive: true });
+    await appendFile(join(dir, "spend.jsonl"), JSON.stringify({ ts: new Date().toISOString(), usd, depth: taskDepth }) + "\n");
+  } catch {
+    /* accounting must never fail a task */
+  }
+}
+
 async function callLLM(prompt: string, cwd: string, config: StroodleConfig, depth: number): Promise<string> {
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
   // Tasks come from other agents, so nothing is auto-approved: "dontAsk" denies every tool
@@ -44,10 +75,12 @@ async function callLLM(prompt: string, cwd: string, config: StroodleConfig, dept
       // Peer tools use this agent's own key (spec 046); nothing else is auto-approved.
       mcpServers: { stroodle: await createPeerServer(config, depth) },
       allowedTools: PEER_TOOL_NAMES,
+      ...taskLimits(),
     },
   });
   for await (const msg of stream) {
     if (msg.type !== "result") continue;
+    await recordSpend(cwd, msg.total_cost_usd ?? 0, depth);
     if (msg.subtype === "success") return msg.result || "(no result)";
     throw new Error(`Task failed: ${msg.subtype}`);
   }
