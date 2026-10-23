@@ -12,6 +12,19 @@ export interface RelayEvents {
 }
 
 /**
+ * Where the relay lives for a registry URL. Stroodle hosts the relay on its own name (API Gateway WebSocket,
+ * spec 049) because the API host cannot serve WebSockets. Any other registry (local, self-hosted) serves it at
+ * /v1/relay on the same host.
+ */
+export function relayUrlFor(registryUrl: string): string {
+  const u = new URL(registryUrl);
+  if (u.hostname === "stroodle.ai" || u.hostname.endsWith(".stroodle.ai")) return "wss://relay.stroodle.ai";
+  const relay = new URL("/v1/relay", u);
+  relay.protocol = relay.protocol === "http:" ? "ws:" : "wss:";
+  return relay.toString();
+}
+
+/**
  * Receives tasks over an outbound WebSocket to the registry relay (spec 038).
  * No public address needed. Reconnects with exponential backoff.
  */
@@ -52,9 +65,7 @@ export class RelayTaskReceiver implements TaskReceiver {
   }
 
   private relayUrl(): string {
-    const u = new URL("/v1/relay", this.registryUrl);
-    u.protocol = u.protocol === "http:" ? "ws:" : "wss:";
-    return u.toString();
+    return relayUrlFor(this.registryUrl);
   }
 
   private connect(): void {
@@ -69,6 +80,8 @@ export class RelayTaskReceiver implements TaskReceiver {
       this.failures = 0;
       this.backoff = MIN_BACKOFF_MS;
       this.pingTimer = setInterval(() => this.send({ type: "ping" }), PING_INTERVAL_MS);
+      // First message: the relay delivers tasks that were queued while we were offline in answer to it
+      this.send({ type: "ping" });
       appendLog("Relay connected", "info", this.projectDir).catch(() => {});
       this.events.onConnected?.();
     });
